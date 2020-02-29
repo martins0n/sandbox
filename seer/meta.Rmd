@@ -1,0 +1,102 @@
+---
+title: "M4metalearning Framework"
+output: html_notebook
+---
+
+
+#### choosing subset of M4 ts (there is 100_000 ts in the dataset)
+```{r}
+library(M4metalearning)
+library(M4comp2018)
+set.seed(31-05-2018)
+indices <- sample(length(M4))
+
+M4_train <- M4[ indices[1:15]]
+M4_test <- M4[indices[16:25]]
+M4_train <- temp_holdout(M4_train)
+M4_test <- temp_holdout(M4_test)
+```
+
+#### typical time series
+
+```{r}
+
+print(M4[[1]]$x)
+plot(M4[[1]]$x)
+```
+
+#### temp_holdout method
+
+```{r}
+print(temp_holdout(M4[1])[[1]]$x)
+```
+
+
+```{r}
+print(temp_holdout(M4[1])[[1]]$xx)
+```
+
+
+#### Making forecast and calculating errors for metaalgorithm training
+
+```{r}
+M4_train <- calc_forecasts(M4_train, forec_methods(), n.cores=3)
+M4_train <- calc_errors(M4_train)
+```
+
+
+#### features for metaalgorithm aka ts-classifier
+
+```{r}
+library(tsfeatures)
+M4_train <- THA_features(M4_train)
+
+```
+
+```{r}
+train_data <- create_feat_classif_problem(M4_train)
+```
+```{r}
+head(train_data$data)
+```
+
+#### training metalearner classifier for minimise error of ensemble on test period
+
+```{r}
+meta_model <- train_selection_ensemble(train_data$data, train_data$errors)
+```
+##### test dataset forecasts
+```{r}
+M4_test <- calc_forecasts(M4_test, forec_methods(), n.cores=1)
+```
+
+##### features to predict weights
+```{r}
+M4_test <- THA_features(M4_test, n.cores=1)
+```
+
+
+```{r}
+test_data <- create_feat_classif_problem(M4_test)
+```
+
+#### predictions of weights for every ts and forecast method:
+```{r}
+preds <- predict_selection_ensemble(meta_model, test_data$data)
+```
+```{r}
+preds
+```
+
+#### forecasting
+```{r}
+M4_test <- ensemble_forecast(preds, M4_test)
+
+```
+```{r}
+print(M4_test[[1]]$xx)
+print(M4_test[[1]]$y_hat)
+```
+
+
+    
