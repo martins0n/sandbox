@@ -1,6 +1,8 @@
 ---
 title: "M4metalearning Framework"
-output: html_notebook
+output:
+  pdf_document: default 
+  html_notebook: default
 ---
 
 
