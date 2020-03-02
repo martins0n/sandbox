@@ -124,8 +124,8 @@ def m4meta_train(model_path):
         save(meta_model, file = name)
     }
     """
-    rfunc = r(r_string)
-    rfunc(model_path)
+    train_model_func = r(r_string)
+    train_model_func(model_path)
 
 
 def load_model(str_name="temp.Rdata"):
