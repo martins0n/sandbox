@@ -1,0 +1,11 @@
+notes: NA
+r-version: 3.6
+mran-date: 2019-06-15
+update-packages: FALSE
+depends:
+  devtools
+  forecast
+  github::robjhyndman/M4metalearning
+  github::pmontman/tsfeatures
+  github::pmontman/customxgboost
+  github::carlanetto/M4comp2018
