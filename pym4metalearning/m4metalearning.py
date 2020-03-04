@@ -13,11 +13,10 @@ my_path = os.path.abspath(os.path.dirname(__file__))
 m4metalearning_r_script_path = os.path.join(my_path, "pym4metalearning/m4metalearning.R")
 
 """
-m4metalearning_r_script_path = resource_filename(
-    'pym4metalearning', 'm4metalearning.R'
-)
+m4metalearning_r_script_path = resource_filename("pym4metalearning", "m4metalearning.R")
 
 print(m4metalearning_r_script_path)
+
 
 def pd_series_to_ts(ts: pd.Series):
     """
@@ -115,7 +114,7 @@ def pd_series_to_ts(ts: pd.Series):
 
 def m4meta_train(model_path: str, ts_to_add_to_train: Optional[List[pd.Series]] = None):
     r(f"""source('{m4metalearning_r_script_path}')""")
-    train_model_func = r['train_model']
+    train_model_func = r["train_model"]
     train_model_func(model_path, BoolVector([False]))
 
 
@@ -136,7 +135,7 @@ def make_prediction(ts: pd.Series, model_path: str, h: int = 6, full: bool = Fal
 
     r(f"""source('{m4metalearning_r_script_path}')""")
 
-    r_make_prediction = r['make_prediction']
+    r_make_prediction = r["make_prediction"]
     r_make_prediction = r_make_prediction(ts_r, meta_model, h)
 
     if full:
