@@ -1,9 +1,23 @@
+import os
+from pkg_resources import resource_filename
+from typing import List, Optional
 import numpy as np
 import pandas as pd
 from rpy2.robjects.packages import importr
 from rpy2.robjects import r
-from rpy2.robjects.vectors import IntVector, FloatVector, ListVector
+from rpy2.robjects.vectors import IntVector, FloatVector, ListVector, BoolVector
 
+
+"""
+my_path = os.path.abspath(os.path.dirname(__file__))
+m4metalearning_r_script_path = os.path.join(my_path, "pym4metalearning/m4metalearning.R")
+
+"""
+m4metalearning_r_script_path = resource_filename(
+    'pym4metalearning', 'm4metalearning.R'
+)
+
+print(m4metalearning_r_script_path)
 
 def pd_series_to_ts(ts: pd.Series):
     """
@@ -99,42 +113,19 @@ def pd_series_to_ts(ts: pd.Series):
         raise NotImplementedError
 
 
-"""
-def forecast(ts: pd.Series):
-    ts = pd_series_to_ts(ts)
-    _forecast = importr('forecast')
-    return _forecast.Arima(ts, order=IntVector((2,0,0)))
-"""
+def m4meta_train(model_path: str, ts_to_add_to_train: Optional[List[pd.Series]] = None):
+    r(f"""source('{m4metalearning_r_script_path}')""")
+    train_model_func = r['train_model']
+    train_model_func(model_path, BoolVector([False]))
 
 
-def m4meta_train(model_path):
-    r_string = """
-    train_model_func <- function(name){
-        library(M4metalearning)
-        library(M4comp2018)
-        library(tsfeatures)
-        set.seed(31-05-2018)
-        M4_train <- M4
-        M4_train <- temp_holdout(M4_train)
-        M4_train <- calc_forecasts(M4_train, forec_methods(), n.cores=4)
-        M4_train <- calc_errors(M4_train)
-        M4_train <- THA_features(M4_train)
-        train_data <- create_feat_classif_problem(M4_train)
-        meta_model <- train_selection_ensemble(train_data$data, train_data$errors)
-        save(meta_model, file = name)
-    }
-    """
-    train_model_func = r(r_string)
-    train_model_func(model_path)
-
-
-def load_model(str_name="temp.Rdata"):
-    r["load"](str_name)
+def load_model(model_path: str):
+    r["load"](model_path)
     model = r["meta_model"]
     return model
 
 
-def make_prediction(ts: pd.Series, model_path, h=6, full=False):
+def make_prediction(ts: pd.Series, model_path: str, h: int = 6, full: bool = False):
 
     meta_model = load_model(model_path)
 
@@ -143,29 +134,18 @@ def make_prediction(ts: pd.Series, model_path, h=6, full=False):
     ts_freq = ts.index[-1] - ts.index[-2]
     ts_end = ts.index[-1]
 
-    r_string = """
-    function(ts, meta_model, h){
-        library(M4metalearning)
-        library(M4comp2018)
-        library(tsfeatures)
-        ts <- list(list(x=ts, h=h))
-        ts <- calc_forecasts(ts, forec_methods(), n.cores=1)
-        ts <- THA_features(ts, n.cores=1)
-        weights <- create_feat_classif_problem(ts)
-        weights <- predict_selection_ensemble(meta_model, weights$data)
-        ts <- ensemble_forecast(weights, ts)
-        return(ts[[1]])
-    }
-    """
-    r_forecast = r(r_string)
-    r_forecast = r_forecast(ts_r, meta_model, h)
+    r(f"""source('{m4metalearning_r_script_path}')""")
+
+    r_make_prediction = r['make_prediction']
+    r_make_prediction = r_make_prediction(ts_r, meta_model, h)
+
     if full:
-        return r_forecast
+        return r_make_prediction
     else:
         return pd.Series(
-            np.array(r_forecast.rx2("y_hat")),
+            np.array(r_make_prediction.rx2("y_hat")),
             index=pd.date_range(
                 start=ts_end + pd.to_timedelta(ts_freq), freq=ts_freq, periods=h
             ),
         )
-    return r_forecast
+    return r_make_prediction
