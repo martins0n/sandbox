@@ -4,7 +4,7 @@ library(tsfeatures)
 set.seed(31-05-2018)
 
 
-train_model <- function(model_path, full, ts_to_add){
+train_model <- function(model_path, full, ts_to_add, n.cores=8){
     M4_train <- M4
     if (isFALSE(full)){
         indices <- sample(length(M4))
@@ -17,7 +17,7 @@ train_model <- function(model_path, full, ts_to_add){
     print(length(M4_train))
 
     M4_train <- temp_holdout(M4_train)
-    M4_train <- calc_forecasts(M4_train, forec_methods(), n.cores=4)
+    M4_train <- calc_forecasts(M4_train, forec_methods(), n.cores=n.cores)
     M4_train <- calc_errors(M4_train)
     M4_train <- THA_features(M4_train)
     train_data <- create_feat_classif_problem(M4_train)

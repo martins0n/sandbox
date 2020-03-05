@@ -8,14 +8,7 @@ from rpy2.robjects import r
 from rpy2.robjects.vectors import IntVector, FloatVector, ListVector, BoolVector
 
 
-"""
-my_path = os.path.abspath(os.path.dirname(__file__))
-m4metalearning_r_script_path = os.path.join(my_path, "pym4metalearning/m4metalearning.R")
-
-"""
 m4metalearning_r_script_path = resource_filename("pym4metalearning", "m4metalearning.R")
-
-print(m4metalearning_r_script_path)
 
 
 def pd_series_to_ts(ts: pd.Series):
@@ -112,10 +105,15 @@ def pd_series_to_ts(ts: pd.Series):
         raise NotImplementedError
 
 
-def m4meta_train(model_path: str, ts_to_add_to_train: Optional[List[pd.Series]] = None):
+def m4meta_train(model_path: str, full_train: bool = False, ts_to_add_to_train: Optional[List[pd.Series]] = None):
     r(f"""source('{m4metalearning_r_script_path}')""")
     train_model_func = r["train_model"]
-    train_model_func(model_path, BoolVector([False]))
+    if ts_to_add_to_train is None:
+        train_model_func(model_path, BoolVector([full_train]))
+    else:
+        ts_to_add_to_train = map(pd_series_to_ts, ts_to_add_to_train)
+        ts_to_add_to_train = ListVector(ts_to_add_to_train)
+        train_model_func(model_path, BoolVector([full_train]), ts_to_add_to_train)
 
 
 def load_model(model_path: str):
