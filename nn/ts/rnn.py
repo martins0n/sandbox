@@ -1,21 +1,19 @@
-from typing import Dict, List
-from importlib_metadata import metadata
+import pathlib
+from functools import partial
+from itertools import islice
+from typing import Any, Dict, List
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
-
 from gluonts.dataset.repository.datasets import get_dataset
+from gluonts.evaluation import Evaluator, make_evaluation_predictions
+from gluonts.torch.model.estimator import PyTorchLightningEstimator
 from gluonts.torch.model.predictor import PyTorchPredictor
-from gluonts.dataset.field_names import FieldName
-from gluonts.transform import (
-    AddObservedValuesIndicator,
-    InstanceSplitter,
-    ExpectedNumInstanceSampler,
-    TestSplitSampler,
-)
-from gluonts.dataset.loader import TrainDataLoader
-from gluonts.itertools import Cached
-from gluonts.torch.batchify import batchify
+
+from ffn import FFNetEstimator
 
 
 class RNNet(nn.Module):
@@ -38,7 +36,8 @@ class RNNet(nn.Module):
         self.prediction_length = prediction_length
         self.context_length = context_length
         self.shapes = [input_size] + hidden_dim
-        self.cell = nn.RNN
+        # self.cell = partial(nn.RNN, nonlinearity="relu")
+        self.cell = nn.GRU
         modules = [
             self.cell(input_size=in_dim, hidden_size=out_dim, batch_first=True)
             for (in_dim, out_dim) in zip(self.shapes[:-1], self.shapes[1:])
@@ -47,34 +46,67 @@ class RNNet(nn.Module):
         self.layers = nn.ModuleList(modules=modules)
         self.loss = nn.MSELoss()
 
-    def forward(self, context: torch.Tensor):
+    def forward(
+        self,
+        context: torch.Tensor,  # (batch_size, context_length + prediction_length | 0 )
+    ) -> torch.Tensor:
         modules = list(iter(self.layers))
-        if self.training:
+        if False:
+            # (batch_size, context_length + prediction_length, 1)
             output = context.unsqueeze(dim=-1)
+            # (batch_size, 1)
+            scale = (
+                context[:, : self.context_length]
+                .mean(dim=1, keepdim=True)
+                .abs()
+                .clip(1e-5)
+            )
+            output = output / scale.unsqueeze(dim=-1)
             for layer in modules[:-1]:
                 output, hs = layer(output)
-            decoder_output = output[:, -self.prediction_length :]
-            decoder_output = modules[-1](decoder_output)
+            # (batch_size, prediction_length, self.shapes[-1])
+            decoder_output = output[:, -self.prediction_length - 1 : -1]
+            # (batch_size, prediction_length, 1)
+            decoder_output = modules[-1](decoder_output) * scale.unsqueeze(dim=-1)
+            # (batch_size, 1, prediction_length)
             return decoder_output.reshape(decoder_output.shape[0], 1, -1)
         else:
             forecasts: List[torch.Tensor] = list()
             hidden_states = list()
+            # (batch_size, context_length, 1)
             output = context.unsqueeze(dim=-1)
+            # (batch_size, 1)
+            scale = (
+                context[:, : self.context_length]
+                .mean(dim=1, keepdim=True)
+                .abs()
+                .clip(1e-5)
+            )
+            # (batch_size, context_length, 1)
+            output = output / scale.unsqueeze(dim=-1)
             for layer in modules[:-1]:
                 output, hs = layer(output)
                 hidden_states.append(hs)
+            # (batch_size, self.hidden_dim[-1])
             decoder_output = output[:, -1]
-            decoder_output = modules[-1](decoder_output)
+            # (batch_size, 1)
+            decoder_output: torch.Tensor = modules[-1](decoder_output) * scale
+            assert decoder_output.shape == (decoder_output.shape[0], 1)
             forecasts.append(decoder_output)
             for _ in range(1, self.prediction_length):
+                # (batch_size, 1, 1)
                 output = forecasts[-1].unsqueeze(dim=1)
+                assert output.shape == (decoder_output.shape[0], 1, 1)
+                output = output / scale
                 for idx, layer in enumerate(modules[:-1]):
                     output, hs = layer(output, hidden_states[idx])
                     hidden_states[idx] = hs
                 decoder_output = output[:, -1]
-                decoder_output = modules[-1](decoder_output)
+                # (batch_size, 1)
+                decoder_output = modules[-1](decoder_output) * scale
                 forecasts.append(decoder_output)
             forecast = torch.cat(forecasts, dim=1).unsqueeze(1)
+            assert forecast.shape == (context.shape[0], 1, self.prediction_length)
             return forecast
 
     def get_predictor(self, input_transform, batch_size: int = 32, device="cpu"):
@@ -103,16 +135,62 @@ class RNNetGluon(RNNet, pl.LightningModule):
             freq, hidden_dim, prediction_length, context_length, input_size
         )
         self.lr = lr
+        self.save_hyperparameters()
 
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
         context = batch["past_target"]
         target = batch["future_target"]
-        context = torch.cat((context, target), dim=1)
+        # context = torch.cat((context, target), dim=1)
         target_prediction = self(context)
-        return self.loss(target_prediction, target.unsqueeze(dim=1))
+        scale = (context.abs().mean(dim=1, keepdim=True).clip(1e-5, 1000)).unsqueeze(
+            dim=1
+        )
+        scaled_prediction = target_prediction / scale
+        scaled_target = target.unsqueeze(dim=1) / scale
+        loss = self.loss(scaled_prediction, scaled_target)
+        self.log(
+            "train_loss",
+            loss.item() ** (0.5),
+            on_epoch=True,
+            on_step=False,
+            prog_bar=True,
+        )
+        return loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
+
+
+class RNNNetEstimator(FFNetEstimator):
+    def __init__(
+        self,
+        freq: str,
+        hidden_dim: List[int],
+        prediction_length: int,
+        context_length: int,
+        batch_size: int,
+        num_batches_per_epoch: int,
+        trainer_kwargs: Dict[str, Any] = dict(),
+        lr: float = 1e-4,
+    ) -> None:
+        PyTorchLightningEstimator.__init__(self, trainer_kwargs=trainer_kwargs)
+
+        self.freq = freq
+        self.hidden_dim = hidden_dim
+        self.prediction_length = prediction_length
+        self.context_length = context_length
+        self.lr = lr
+        self.batch_size = batch_size
+        self.num_batches_per_epoch = num_batches_per_epoch
+
+    def create_lightning_module(self) -> pl.LightningModule:
+        return RNNetGluon(
+            freq=self.freq,
+            hidden_dim=self.hidden_dim,
+            prediction_length=self.prediction_length,
+            context_length=self.context_length,
+            lr=self.lr,
+        )
 
 
 if __name__ == "__main__":
@@ -143,68 +221,55 @@ if __name__ == "__main__":
     freq = "1H"
     context_length = 2 * 7 * 24
     prediction_length = dataset.metadata.prediction_length
-    print(dataset.metadata)
-    hidden_dimensions = [96, 48]
+    hidden_dimensions = [64]
 
-    net = RNNetGluon(
+    batch_size = 16
+    num_batches_per_epoch = 100
+
+    ASSETS_PATH = pathlib.Path(__file__).parent / "assets"
+
+    model = RNNNetEstimator(
         freq=freq,
         prediction_length=prediction_length,
         context_length=context_length,
         hidden_dim=hidden_dimensions,
-    )
-
-    for p in net.parameters():
-        # print(p.shape)
-        pass
-    mask_unobserved = AddObservedValuesIndicator(
-        target_field=FieldName.TARGET,
-        output_field=FieldName.OBSERVED_VALUES,
-    )
-    training_splitter = InstanceSplitter(
-        target_field=FieldName.TARGET,
-        is_pad_field=FieldName.IS_PAD,
-        start_field=FieldName.START,
-        forecast_start_field=FieldName.FORECAST_START,
-        instance_sampler=ExpectedNumInstanceSampler(
-            num_instances=1,
-            min_future=prediction_length,
-        ),
-        past_length=context_length,
-        future_length=prediction_length,
-        time_series_fields=[FieldName.OBSERVED_VALUES],
-    )
-
-    batch_size = 32
-    num_batches_per_epoch = 100
-
-    data_loader = TrainDataLoader(
-        Cached(dataset.train),
         batch_size=batch_size,
-        stack_fn=batchify,
-        transform=mask_unobserved + training_splitter,
         num_batches_per_epoch=num_batches_per_epoch,
+        trainer_kwargs=dict(max_epochs=10),
+        lr=1e-3,
     )
-    from gluonts.evaluation import make_evaluation_predictions, Evaluator
+    predictor = model.train(
+        training_data=dataset.train,
+        shuffle_buffer_length=5,
+    )
 
-    trainer = pl.Trainer(max_epochs=1, gpus=None)
-    trainer.fit(net, train_dataloader=data_loader)
-
-    prediction_splitter = InstanceSplitter(
-        target_field=FieldName.TARGET,
-        is_pad_field=FieldName.IS_PAD,
-        start_field=FieldName.START,
-        forecast_start_field=FieldName.FORECAST_START,
-        instance_sampler=TestSplitSampler(),
-        past_length=context_length,
-        future_length=prediction_length,
-        time_series_fields=[FieldName.OBSERVED_VALUES],
-    )
-    predictor_pytorch = net.get_predictor(
-        mask_unobserved + prediction_splitter, batch_size=1
-    )
     forecast_it, ts_it = make_evaluation_predictions(
-        dataset=dataset.test, predictor=predictor_pytorch, num_samples=1
+        dataset=dataset.test, predictor=predictor, num_samples=1
     )
 
     forecasts_pytorch = list(f for f in forecast_it)
     tss_pytorch = list(ts_it)
+
+    # figure plot
+
+    plt.figure(figsize=(20, 15))
+
+    for idx, (forecast, ts) in islice(
+        enumerate(zip(forecasts_pytorch, tss_pytorch)), 9
+    ):
+        ax = plt.subplot(3, 3, idx + 1)
+        plt.plot(ts[-5 * prediction_length :], label="target")
+        forecast.plot()
+
+    plt.gcf().tight_layout()
+    plt.legend()
+    plt.savefig(ASSETS_PATH / "rnnnet-electricity.png", dpi=200)
+
+    # metrics
+
+    evaluator = Evaluator(quantiles=[0.5])
+    metrics_pytorch, _ = evaluator(
+        iter(tss_pytorch), iter(forecasts_pytorch), num_series=len(dataset.test)
+    )
+    with open(ASSETS_PATH / "rnnnet-electricity.metrics", "w") as f:
+        pd.DataFrame.from_records(metrics_pytorch, index=["RNNNet"]).to_markdown(f)
