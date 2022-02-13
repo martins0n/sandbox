@@ -1,17 +1,28 @@
 import pathlib
 from functools import partial
 from itertools import islice
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+from gluonts.dataset.field_names import FieldName
 from gluonts.dataset.repository.datasets import get_dataset
 from gluonts.evaluation import Evaluator, make_evaluation_predictions
 from gluonts.torch.model.estimator import PyTorchLightningEstimator
 from gluonts.torch.model.predictor import PyTorchPredictor
+from gluonts.transform import (
+    AddAgeFeature,
+    AddObservedValuesIndicator,
+    AdhocTransform,
+    ConcatFeatures,
+    ExpectedNumInstanceSampler,
+    InstanceSplitter,
+    TestSplitSampler,
+    Transformation,
+)
 
 from ffn import FFNetEstimator
 
@@ -48,7 +59,11 @@ class RNNet(nn.Module):
 
     def forward(
         self,
-        context: torch.Tensor,  # (batch_size, context_length + prediction_length | 0 )
+        past_target: torch.Tensor,  # (batch_size, context_length + prediction_length | 0 ),
+        past_exog: Optional[
+            torch.Tensor
+        ] = None,  # (batch_size, context_length + prediction_length)
+        future_exog: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         modules = list(iter(self.layers))
         if False:
@@ -71,19 +86,35 @@ class RNNet(nn.Module):
             # (batch_size, 1, prediction_length)
             return decoder_output.reshape(decoder_output.shape[0], 1, -1)
         else:
+            batch_size = past_target.shape[0]
             forecasts: List[torch.Tensor] = list()
             hidden_states = list()
+
+            if future_exog is not None:
+                exog_features = torch.cat((past_exog, future_exog), dim=1)
+            else:
+                exog_features = None
+
+            if exog_features is not None:
+                assert exog_features.shape[2] == self.input_size - 1
             # (batch_size, context_length, 1)
-            output = context.unsqueeze(dim=-1)
+            output = past_target.unsqueeze(dim=-1)
             # (batch_size, 1)
             scale = (
-                context[:, : self.context_length]
+                past_target[:, : self.context_length]
                 .mean(dim=1, keepdim=True)
                 .abs()
-                .clip(1e-5)
+                .clip(1e-5, 1e5)
             )
             # (batch_size, context_length, 1)
             output = output / scale.unsqueeze(dim=-1)
+            assert output.shape == (batch_size, self.context_length, 1)
+
+            if exog_features is not None:
+                exog_features = exog_features / exog_features.mean(dim=1, keepdim=True)
+                output = torch.cat(
+                    (output, exog_features[:, : self.context_length]), dim=2
+                )
             for layer in modules[:-1]:
                 output, hs = layer(output)
                 hidden_states.append(hs)
@@ -93,11 +124,25 @@ class RNNet(nn.Module):
             decoder_output: torch.Tensor = modules[-1](decoder_output) * scale
             assert decoder_output.shape == (decoder_output.shape[0], 1)
             forecasts.append(decoder_output)
-            for _ in range(1, self.prediction_length):
+            for idx in range(1, self.prediction_length):
                 # (batch_size, 1, 1)
                 output = forecasts[-1].unsqueeze(dim=1)
-                assert output.shape == (decoder_output.shape[0], 1, 1)
-                output = output / scale
+                output = output / scale.unsqueeze(dim=-1)
+                assert output.shape == (batch_size, 1, 1)
+                if exog_features is not None:
+                    output = torch.cat(
+                        (
+                            output,
+                            exog_features[
+                                :,
+                                self.context_length
+                                + idx
+                                - 1 : self.context_length
+                                + idx,
+                            ],
+                        ),
+                        dim=2,
+                    )
                 for idx, layer in enumerate(modules[:-1]):
                     output, hs = layer(output, hidden_states[idx])
                     hidden_states[idx] = hs
@@ -106,19 +151,8 @@ class RNNet(nn.Module):
                 decoder_output = modules[-1](decoder_output) * scale
                 forecasts.append(decoder_output)
             forecast = torch.cat(forecasts, dim=1).unsqueeze(1)
-            assert forecast.shape == (context.shape[0], 1, self.prediction_length)
+            assert forecast.shape == (past_target.shape[0], 1, self.prediction_length)
             return forecast
-
-    def get_predictor(self, input_transform, batch_size: int = 32, device="cpu"):
-        return PyTorchPredictor(
-            prediction_length=self.prediction_length,
-            freq=self.freq,
-            input_names=["past_target"],
-            prediction_net=self,
-            batch_size=batch_size,
-            input_transform=input_transform,
-            device=device,
-        )
 
 
 class RNNetGluon(RNNet, pl.LightningModule):
@@ -138,16 +172,19 @@ class RNNetGluon(RNNet, pl.LightningModule):
         self.save_hyperparameters()
 
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
-        context = batch["past_target"]
+        past_target = batch["past_target"]
         target = batch["future_target"]
+        future_exog_features = batch.get("future_exog")
+        past_exog_features = batch.get("past_exog")
         # context = torch.cat((context, target), dim=1)
-        target_prediction = self(context)
-        scale = (context.abs().mean(dim=1, keepdim=True).clip(1e-5, 1000)).unsqueeze(
-            dim=1
-        )
+        target_prediction = self(past_target, past_exog_features, future_exog_features)
+        scale = (
+            past_target.abs().mean(dim=1, keepdim=True).clip(1e-5, 1e10)
+        ).unsqueeze(dim=1)
         scaled_prediction = target_prediction / scale
         scaled_target = target.unsqueeze(dim=1) / scale
         loss = self.loss(scaled_prediction, scaled_target)
+
         self.log(
             "train_loss",
             loss.item() ** (0.5),
@@ -172,6 +209,7 @@ class RNNNetEstimator(FFNetEstimator):
         num_batches_per_epoch: int,
         trainer_kwargs: Dict[str, Any] = dict(),
         lr: float = 1e-4,
+        input_size: int = 1,
     ) -> None:
         PyTorchLightningEstimator.__init__(self, trainer_kwargs=trainer_kwargs)
 
@@ -182,6 +220,7 @@ class RNNNetEstimator(FFNetEstimator):
         self.lr = lr
         self.batch_size = batch_size
         self.num_batches_per_epoch = num_batches_per_epoch
+        self.input_size = input_size
 
     def create_lightning_module(self) -> pl.LightningModule:
         return RNNetGluon(
@@ -190,6 +229,66 @@ class RNNNetEstimator(FFNetEstimator):
             prediction_length=self.prediction_length,
             context_length=self.context_length,
             lr=self.lr,
+            input_size=self.input_size,
+        )
+
+    def create_transformation(self) -> Transformation:
+        mask_unobserved = AddObservedValuesIndicator(
+            target_field=FieldName.TARGET,
+            output_field=FieldName.OBSERVED_VALUES,
+        )
+        add_age_feature = AddAgeFeature(
+            target_field=FieldName.TARGET,
+            output_field=FieldName.FEAT_AGE,
+            pred_length=self.prediction_length,
+            log_scale=True,
+        )
+        concat_feature = ConcatFeatures(
+            output_field="exog", input_fields=[FieldName.FEAT_AGE], drop_inputs=True
+        )
+        return mask_unobserved + add_age_feature + concat_feature
+
+    def create_predictor(
+        self,
+        transformation: Transformation,
+        module: pl.LightningModule,
+        device: str = "cpu",
+    ) -> PyTorchPredictor:
+        prediction_splitter = self._create_instance_splitter("test")
+        return PyTorchPredictor(
+            prediction_length=self.prediction_length,
+            freq=self.freq,
+            input_names=["past_target", "past_exog", "future_exog"],
+            prediction_net=module,
+            batch_size=self.batch_size,
+            input_transform=transformation + prediction_splitter,
+            device=device,
+        )
+
+    def _create_instance_splitter(self, mode: str):
+        assert mode in ["training", "validation", "test"]
+
+        instance_sampler = {
+            "training": ExpectedNumInstanceSampler(
+                num_instances=1,
+                min_future=self.prediction_length,
+            ),
+            "validation": ExpectedNumInstanceSampler(
+                num_instances=1,
+                min_future=self.prediction_length,
+            ),
+            "test": TestSplitSampler(),
+        }[mode]
+
+        return InstanceSplitter(
+            target_field=FieldName.TARGET,
+            is_pad_field=FieldName.IS_PAD,
+            start_field=FieldName.START,
+            forecast_start_field=FieldName.FORECAST_START,
+            instance_sampler=instance_sampler,
+            past_length=self.context_length,
+            future_length=self.prediction_length,
+            time_series_fields=[FieldName.OBSERVED_VALUES, "exog"],
         )
 
 
@@ -199,21 +298,25 @@ if __name__ == "__main__":
     prediction_length = 10
     context_length = 11
     hidden_dims = [10, 10]
-    input_tensor = torch.rand((batch_size, context_length + prediction_length))
+    exog_dim = 2
+    input_tensor = torch.rand((batch_size, context_length))
+    past_exog_features = torch.rand((batch_size, context_length, exog_dim))
+    future_exog_features = torch.rand((batch_size, prediction_length, exog_dim))
 
     net = RNNet(
         freq="1D",
         hidden_dim=hidden_dims,
         prediction_length=prediction_length,
         context_length=context_length,
+        input_size=1 + exog_dim,
     )
 
-    output = net(input_tensor)
+    output = net(input_tensor, past_exog_features, future_exog_features)
     assert output.shape == (batch_size, 1, prediction_length)
 
     net.eval()
 
-    output = net(input_tensor)
+    output = net(input_tensor, past_exog_features, future_exog_features)
     assert output.shape == (batch_size, 1, prediction_length)
 
     dataset = get_dataset("electricity")
@@ -236,7 +339,8 @@ if __name__ == "__main__":
         batch_size=batch_size,
         num_batches_per_epoch=num_batches_per_epoch,
         trainer_kwargs=dict(max_epochs=10),
-        lr=1e-3,
+        lr=1e-2,
+        input_size=2,
     )
     predictor = model.train(
         training_data=dataset.train,
