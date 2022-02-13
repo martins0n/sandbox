@@ -1,3 +1,4 @@
+import pathlib
 from itertools import islice
 from typing import Any, Dict, List
 
@@ -22,7 +23,6 @@ from gluonts.transform import (
     TestSplitSampler,
     Transformation,
 )
-from importlib_metadata import pathlib
 
 
 class FFNet(nn.Module):
