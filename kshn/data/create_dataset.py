@@ -49,21 +49,26 @@ def split_text(text: str, prob: float = 0.5) -> List[str]:
 
     return text
 
-def create_dataset(data_generators: List[Callable[[], List[ScrapedData]]], prob: float = 0.5) -> Dataset:
+def create_dataset(data_generators: List[Callable[[], List[ScrapedData]]], prob: float = 0.5, split: bool = False) -> Dataset:
     data = []
     for generator in data_generators:
         data.extend(generator())
     df = pd.DataFrame(data)
-    df['text'] = df['content'].apply(partial(split_text, prob=prob))
-    df = df[['text']]
-    df = df.explode('text')
+    df = df[df["content"] != ""]
+    if split:
+        df['text'] = df['content'].apply(partial(split_text, prob=prob))
+        df = df[['text']]
+        df = df.explode('text')
+    else:
+        df['text'] = df['content']
+        df = df[['text']]
     return Dataset.from_pandas(df)
 
 if __name__ == "__main__":
         
-    dataset = create_dataset([kashin_guru_to_list, kashin_lj_to_list], prob=0.5)
+    dataset = create_dataset([kashin_guru_to_list, kashin_lj_to_list], prob=0.5, split=False)
     
     dataset = dataset.train_test_split(train_size=0.9, seed=SEED)
     
     for split, dataset in dataset.items():
-        dataset.to_json(FILE_DIR / "datasets" / f"kashin-v1-{split}.jsonl")
+        dataset.to_json(FILE_DIR / "datasets" / f"kashin-v1-{split}.json")
