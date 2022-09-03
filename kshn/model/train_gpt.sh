@@ -9,4 +9,5 @@ python finetune.py \
     --output_dir ../tmp/test-clm \
     --save_strategy epoch \
     --logging_strategy epoch \
+    --block_size 128 \
     --num_train_epochs 5
