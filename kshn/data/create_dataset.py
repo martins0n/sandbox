@@ -1,5 +1,5 @@
 import pandas as pd
-import datasets
+import re
 from datasets import Dataset
 
 from functools import partial
@@ -55,6 +55,8 @@ def create_dataset(data_generators: List[Callable[[], List[ScrapedData]]], prob:
         data.extend(generator())
     df = pd.DataFrame(data)
     df = df[df["content"] != ""]
+    df = df.drop_duplicates(subset=["content"])
+    df["content"] = df["content"].apply(lambda x: re.sub(r'http\S+', '', x))
     if split:
         df['text'] = df['content'].apply(partial(split_text, prob=prob))
         df = df[['text']]
