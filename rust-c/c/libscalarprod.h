@@ -1,0 +1,1 @@
+float scalarprod(float *a, float *b, int n);
