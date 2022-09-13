@@ -6,11 +6,19 @@ import subprocess
 import os
 import shutil
 import json
+import re
 
 import argparse
 
 
 GIT_PROJECT = "https://github.com/tinkoff-ai/etna"
+
+
+def docstring_remove(source_code):
+    start_idx = [m.start() for m in re.finditer('"""', source_code)]
+    start_idx.insert(0, 0)
+    start_idx.append(-1)
+    return "".join([source_code[start_idx[i]:start_idx[i+1]] for i in range(0, len(start_idx)-1, 2)]).replace('"""', "")
 
 
 def parse_file_to_intervaltree(file_path: str) -> intervaltree.IntervalTree:
@@ -35,7 +43,7 @@ def parse_file_to_intervaltree(file_path: str) -> intervaltree.IntervalTree:
             interval_ = node_interval(item)
             tree[interval_[0] : interval_[1]] = dict(
                 name=item.name,
-                source_code="\n".join(file_content[interval_[0] - 1 : interval_[1]]),
+                source_code=docstring_remove("\n".join(file_content[interval_[0] - 1 : interval_[1]])),
             )
             break
 
