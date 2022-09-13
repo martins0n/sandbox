@@ -8,7 +8,9 @@ edition = "2021"
 
 
 [dependencies]
-onnxruntime = "0.0.14"
 tokenizers = "0.11.3"
-tracing = "0.1"
-tracing-subscriber = "0.2"
+ndarray = "0.15.4"
+
+
+[build-dependencies]
+bindgen = "0.60.1"
