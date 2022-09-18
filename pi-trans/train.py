@@ -76,7 +76,22 @@ class PITransformerNet(RNNNet, DeepBaseNet):
         #loss = self.loss(output, decoder_target, encoder_target)
         loss = self.loss(output, decoder_target)
         return loss, decoder_target, output
+    def training_step(self, batch: dict, *args, **kwargs):  # type: ignore
+        """Training step.
 
+        Parameters
+        ----------
+        batch:
+            batch of data
+
+        Returns
+        -------
+        :
+            loss
+        """
+        loss, a, b = self.step(batch, *args, **kwargs)  # type: ignore
+        self.log("train_loss", loss, on_epoch=True)
+        return loss
 class PITransformerModel(DeepBaseModel):
 
     def __init__(
@@ -118,12 +133,12 @@ class PITransformerModel(DeepBaseModel):
             trainer_params=trainer_params,
             split_params=split_params,
         )
-    
+
 def train_backtest(
     horizon: int = 7,
-    n_epochs: int = 100,
-    lr: float = 0.0001,
-    batch_size: int = 32,
+    n_epochs: int = 80,
+    lr: float = 0.01,
+    batch_size: int = 64,
     seed: int = 11,
     dataset_path: pathlib.Path = pathlib.Path("/Users/marti/Projects/etna/examples/data/example_dataset.csv"),
     experiments_folder: pathlib.Path = pathlib.Path("experiments"),
@@ -134,27 +149,49 @@ def train_backtest(
     parameters["experiments_folder"] = str(experiments_folder)
 
     set_seed(seed)
+    
+    horizon = 5
 
     #original_df = pd.read_csv(dataset_path)
     original_df = generate_from_patterns_df(
-        periods=200, start_time="2020-01-01", patterns=[[50, 50, 50, 50, 50, 90, 100]], freq='D', add_noise=True,  sigma=4,
+        periods=600, start_time="2020-01-01", patterns=[[50, 50, 50, 100, 100]], freq='D', add_noise=True,  sigma=1,
     )
     df = TSDataset.to_dataset(original_df)
     ts = TSDataset(df, freq=dataset_freq)
 
+
     model = PITransformerModel(
-        n_layers=1,
+        n_layers=2,
         #loss = MASELoss(7),
-        decoder_length=horizon,
-        encoder_length=3 * horizon,
+        d_model=32,
+        num_heads=4,
+        d_ff=32,
+        loss=nn.L1Loss(),
+        decoder_length=horizon*2,
+        encoder_length=2 * horizon + 1,
         trainer_params={"max_epochs": n_epochs},
         lr=lr,
         train_batch_size=batch_size,
     )
-
+    num_lags = 14
+    # model = RNNModel(
+    #     decoder_length=horizon,
+    #     encoder_length=2 * horizon,
+    #     input_size=1,
+    #     trainer_params={"max_epochs": n_epochs},
+    #     loss=nn.L1Loss(),
+    #     lr=lr,
+    #     train_batch_size=batch_size,
+    # )
+    transform_lag = LagTransform(
+        in_column="target",
+        lags=[horizon + i for i in range(num_lags)],
+        out_column="target_lag",
+    )
     pipeline = Pipeline(
         model=model,
-        horizon=horizon,
+        horizon=horizon*2,
+        transforms=[StandardScalerTransform(in_column="target")]
     )
 
         # tslogger.add(LocalFileLogger(config=parameters, experiments_folder=experiments_folder))
@@ -166,8 +203,10 @@ def train_backtest(
     # )
 
     metrics = [SMAPE(), MSE(), MAE(), Sign()]
-    metrics, forecast, fold_info = pipeline.backtest(ts, metrics=metrics, n_folds=3, n_jobs=1)    
+    metrics, forecast, fold_info = pipeline.backtest(ts, metrics=metrics, n_folds=1, n_jobs=1)    
     print(metrics)
+    print(forecast.tail(10))
+    print(ts.df.tail(10))
 
 if __name__ == "__main__":
     typer.run(train_backtest)

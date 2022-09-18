@@ -153,6 +153,7 @@ class PITransformerBlock(nn.Module):
             hidden_size=d_model,
             num_attention_heads=num_heads,
         )
+        # self.self_attn = nn.MultiheadAttention(d_model, num_heads)
         self.ff = nn.Sequential(
             nn.Linear(in_features=d_model, out_features=d_ff),
             nn.ReLU(),
@@ -161,8 +162,14 @@ class PITransformerBlock(nn.Module):
     
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         mask = mask_gen(x, self.num_heads)
+        # mask = None
         x = x + self.alpha * self.self_attn(hidden_states=x, attention_mask=mask)[0]
+        #x = self.self_attn(hidden_states=x, attention_mask=mask)[0]
+
+        # x = x + self.alpha * self.self_attn(x, x, x)[0]
         x = x + self.alpha * self.ff(x)
+        #x =  self.self_attn(x, x, x)[0]
+        #x =  self.ff(x)
         return x
     
 class LogMeanScaler(nn.Module):
@@ -195,9 +202,9 @@ class PITransformer(nn.Module):
         )
         
     def forward(self, x: torch.Tensor, shift: int, window_size: int, mask=None) -> torch.Tensor:
-        x = self.scaler(x, inverse=False, shift=shift, window_size=window_size)
+        # x = self.scaler(x, inverse=False, shift=shift, window_size=window_size)
         x = self.transformer(x)
-        x = self.scaler(x, inverse=True, shift=shift, window_size=window_size)
+        # x = self.scaler(x, inverse=True, shift=shift, window_size=window_size)
         return x
 
 def mask_gen(x, n_heads):
