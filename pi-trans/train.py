@@ -1,7 +1,9 @@
+from imp import load_source
 from etna.analysis import plot_backtest
 from etna.models.base import DeepBaseNet, DeepBaseModel
 from etna.models.nn.rnn import RNNNet
 from pi_trans import PITransformer, mask_gen
+from pytorch_lightning.callbacks import EarlyStopping
 import torch
 import numpy as np
 import pandas as pd
@@ -43,7 +45,7 @@ class MASELoss(nn.Module):
     def forward(self, input, target, in_sample):
         sample_mean = (target - input).abs().mean(dim=1)
         seasonal_sample_mean = (in_sample[:, self.seasonality:] - in_sample[:, :-self.seasonality]).abs().mean(dim=1)
-        return (sample_mean / seasonal_sample_mean).mean()
+        return (sample_mean / (seasonal_sample_mean + 1e-2)).mean()
         
 
 
@@ -80,7 +82,7 @@ class PITransformerNet(RNNNet, DeepBaseNet):
         input_ = torch.cat([encoder_real, decoder_real], dim=1)
         mask = mask_gen(input_, self.num_heads) 
         output = self.pi_trans(input_, shift=decoder_real.shape[1], window_size=decoder_real.shape[1], mask=mask)[:, -decoder_target.shape[1]:, :]
-        # loss = self.loss(output, decoder_target, encoder_target)
+        #loss = self.loss(output, decoder_target, encoder_target)
         loss = self.loss(output, decoder_target)
         return loss, decoder_target, output
     def training_step(self, batch: dict, *args, **kwargs):  # type: ignore
@@ -97,8 +99,6 @@ class PITransformerNet(RNNNet, DeepBaseNet):
             loss
         """
         loss, a, b = self.step(batch, *args, **kwargs)  # type: ignore
-        if loss.item() < 2:
-            print(2)
         self.log("train_loss", loss, on_epoch=True)
         return loss
 class PITransformerModel(DeepBaseModel):
@@ -152,6 +152,11 @@ def train_backtest(
     dataset_path: str = "/Users/marti/Projects/etna/examples/data/example_dataset.csv",
     experiments_folder: pathlib.Path = pathlib.Path("experiments"),
     dataset_freq: str = "D",
+    d_model: int = 512,
+    d_ff: int = 1024,
+    n_layers: int = 4,
+    num_heads: int = 4,
+    patience: int = 10,
 ):
     parameters = dict(locals())
     parameters["dataset_path"] = str(dataset_path)
@@ -159,7 +164,7 @@ def train_backtest(
 
     set_seed(seed)
 
-    original_df = pd.read_csv(dataset_path)
+    original_df = pd.read_parquet(dataset_path)
     #original_df = generate_from_patterns_df(
     #    periods=600, start_time="2020-01-01", patterns=[[30, 50, 50, 100, 100]], freq='D', add_noise=True,  sigma=1,
     #)
@@ -168,54 +173,39 @@ def train_backtest(
 
 
     model = PITransformerModel(
-        n_layers=4,
-        # loss = MASELoss(7),
-        d_model=32,
-        num_heads=4,
-        d_ff=128,
-        loss=nn.L1Loss(),
+        n_layers=n_layers,
+        #loss = MASELoss(1),
+        loss = nn.L1Loss(),
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
         decoder_length=horizon,
         encoder_length=2 * horizon + 1,
-        trainer_params={"max_epochs": n_epochs},
+        trainer_params={"max_epochs": n_epochs, "callbacks": [EarlyStopping(monitor="val_loss", patience=patience)]},
         lr=lr,
         train_batch_size=batch_size,
+        split_params={"train_size": 0.8},
     )
-    num_lags = 14
-    # model = RNNModel(
-    #     decoder_length=horizon,
-    #     encoder_length=2 * horizon,
-    #     input_size=1,
-    #     trainer_params={"max_epochs": n_epochs},
-    #     loss=nn.L1Loss(),
-    #     lr=lr,
-    #     train_batch_size=batch_size,
-    # )
-    # transform_lag = LagTransform(
-    #     in_column="target",
-    #     lags=[horizon + i for i in range(num_lags)],
-    #     out_column="target_lag",
-    # )
+
     pipeline = Pipeline(
         model=model,
         horizon=horizon,
-        # transforms=[StandardScalerTransform(in_column="target")]
     )
 
-        # tslogger.add(LocalFileLogger(config=parameters, experiments_folder=experiments_folder))
-    # tslogger.add(
-    #     WandbLogger(
-    #         project="test-pi-transformer",
-    #         config=parameters,
-    #     )
-    # )
+    tslogger.add(
+        WandbLogger(
+            project="test-pi-transformer",
+            config=parameters,
+        )
+    )
 
     metrics = [SMAPE(), MSE(), MAE(), Sign()]
-    metrics, forecast, fold_info = pipeline.backtest(ts, metrics=metrics, n_folds=3, n_jobs=1)    
+    metrics, forecast, fold_info = pipeline.backtest(ts, metrics=metrics, n_folds=1, n_jobs=1)    
     print(metrics)
     print(forecast.tail(10))
     print(ts.df.tail(10))
-    plot_backtest(forecast, ts, history_len=20)
-    plt.show(block=True)
+    # plot_backtest(forecast, ts, history_len=20)
+    # plt.show(block=True)
     
 
 if __name__ == "__main__":
