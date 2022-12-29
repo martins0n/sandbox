@@ -1,0 +1,12 @@
+{
+   "services": {
+      "dummy": {
+         "build": {
+            "context": ".",
+            "dockerfile": "Dockerfile"
+         },
+         "command": "echo 'Hello World!'"
+      }
+   },
+   "version": "3.9"
+}
