@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "celery-examples"
+version = "0.1.0"
+description = ""
+authors = ["martins0n <33594071+martins0n@users.noreply.github.com>"]
+readme = "README.md"
+packages = [{include = "celery_examples"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+celery = {extras = ["redis"], version = "^5.2.7"}
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
