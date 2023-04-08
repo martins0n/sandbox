@@ -1,0 +1,1 @@
+* some experiments with psql COPY
