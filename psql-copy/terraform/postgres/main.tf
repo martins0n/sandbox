@@ -16,14 +16,14 @@ resource "yandex_mdb_postgresql_cluster" "mypg" {
   environment         = "PRESTABLE"
   network_id          = yandex_vpc_network.mynet.id
   security_group_ids  = [ yandex_vpc_security_group.pgsql-sg.id ]
-  deletion_protection = true
+  deletion_protection = false
 
   config {
     version = 15
     resources {
-      resource_preset_id = "s2.micro"
+      resource_preset_id = "b1.medium"
       disk_type_id       = "network-ssd"
-      disk_size          = "20"
+      disk_size          = "300"
     }
   }
 
@@ -31,12 +31,13 @@ resource "yandex_mdb_postgresql_cluster" "mypg" {
     zone      = "ru-central1-a"
     name      = "mypg-host-a"
     subnet_id = yandex_vpc_subnet.mysubnet.id
+    assign_public_ip = true
   }
 }
 
 resource "yandex_mdb_postgresql_database" "db1" {
   cluster_id = yandex_mdb_postgresql_cluster.mypg.id
-  name       = "db1"
+  name       = "db"
   owner      = var.db_username
 }
 

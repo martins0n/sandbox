@@ -1,0 +1,20 @@
+# create docker compose for postgres
+
+version: '3'
+
+services:
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${postgres}
+      POSTGRES_PASSWORD: ${password}
+    ports:
+      - 5432:5432
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+
+volumes:
+  db_data:  
+    driver: local

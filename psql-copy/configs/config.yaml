@@ -1,0 +1,3 @@
+defaults:
+  - storage: local_postgres
+  - data: n100
