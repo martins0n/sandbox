@@ -1,0 +1,6 @@
+ex:
+  hosts:
+    vm01:
+      ansible_host: host1
+    vm02:
+      ansible_host: host2

@@ -1,0 +1,31 @@
+version: '3'
+
+# two services: host1 and host2 with ssh mount current directory to /data
+services:
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /bin/bash -c "while true; do sleep 1; done"
+    volumes:
+      - .:/data
+      - ./keys:/root/.ssh
+      - ./hosts:/etc/ansible/hosts:ro
+
+  host1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /bin/bash -c "/usr/sbin/sshd -D"
+    volumes:
+      - .:/data
+      - ./keys:/root/.ssh
+
+  host2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /bin/bash -c "/usr/sbin/sshd -D"
+    volumes:
+      - .:/data
+      - ./keys:/root/.ssh
