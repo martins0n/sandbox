@@ -1,0 +1,8 @@
+*.csv
+*.parquet
+.terraform
+hydra.yaml
+overrides.yaml
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup

@@ -1,0 +1,10 @@
+storage:
+  host: rc1a-t7a7rebv6fa9ramf.mdb.yandexcloud.net
+  port: 9440
+  user: click
+  password: ${oc.env:password}
+  secure: true
+  verify: true
+  ca_certs: /Users/marti/Projects/sandbox-1/psql-copy/CA.pem
+data:
+  segments: 10000

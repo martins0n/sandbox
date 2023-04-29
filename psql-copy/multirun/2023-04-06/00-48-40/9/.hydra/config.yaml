@@ -1,0 +1,9 @@
+storage:
+  host: rc1a-c815b7chps4w9cod.mdb.yandexcloud.net
+  port: 6432
+  user: post
+  password: ${oc.env:password}
+  db: db
+  sslmode: verify-full
+data:
+  segments: 100000
