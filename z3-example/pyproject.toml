@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "z3-example"
+version = "0.1.0"
+description = ""
+authors = ["martins0n <33594071+martins0n@users.noreply.github.com>"]
+readme = "README.md"
+packages = [{include = "z3_example"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+z3-solver = "^4.12.1.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
