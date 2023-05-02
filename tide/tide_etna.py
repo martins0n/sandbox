@@ -40,7 +40,7 @@ class TiDeNet(DeepBaseNet):
     
     def make_samples(self, df: DataFrame, encoder_length: int, decoder_length: int) -> Iterable[dict]:
         max_sequence_length = encoder_length + decoder_length
-        number_of_sequences = len(df) //  max_sequence_length + 1
+        number_of_sequences = int(len(df) //  max_sequence_length * 10)
         if len(df) == max_sequence_length:
             sequence_start_idx = np.array([0])
         else:
@@ -51,7 +51,6 @@ class TiDeNet(DeepBaseNet):
         for idx in sequence_start_idx:
             sample = dict()
             view = df.iloc[idx:idx + max_sequence_length].select_dtypes(include=[np.number])
-            
             sample['encoder_target'] = view[['target']][:encoder_length].values.astype(np.float32)
             sample['decoder_target'] = view[['target']][encoder_length:].values.astype(np.float32)
             sample['encoder_covariates'] = view.drop(columns=['target'])[:encoder_length].values.astype(np.float32)
@@ -63,10 +62,12 @@ class TiDeNet(DeepBaseNet):
         
         return samples
     
-    def configure_optimizers(self) -> "torch.optim.Optimizer":
+    def configure_optimizers(self):
         """Optimizer configuration."""
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, **self.optimizer_params)
-        return optimizer
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2, eta_min=1e-6)
+        return [optimizer], [scheduler]
+
 
 
 class TiDeModel(DeepBaseModel):

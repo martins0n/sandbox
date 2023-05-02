@@ -1,8 +1,9 @@
 from etna.datasets.datasets_generation import generate_ar_df, generate_from_patterns_df
 from etna.pipeline import Pipeline
 from tide_etna import TiDeModel
-from etna.transforms import StandardScalerTransform
+from etna.transforms import StandardScalerTransform, TimeFlagsTransform, DateFlagsTransform
 from etna.datasets import TSDataset
+from pytorch_lightning.callbacks import LearningRateMonitor
 import torch
 import numpy as np
 import random
@@ -88,7 +89,10 @@ def run_pipeline(cfg):
     train_dataset = train_dataset.to_pandas()
     test_dataset = test_dataset.to_pandas()
     
-    tsdataset = TSDataset(pd.concat((train_dataset, test_dataset)), freq=cfg.dataset.freq)
+    tsdataset = pd.concat([train_dataset, test_dataset])
+    
+    
+    tsdataset = TSDataset(tsdataset, freq=cfg.dataset.freq, known_future='all')
     
     
     
@@ -109,9 +113,12 @@ def run_pipeline(cfg):
     feature_projection_output_size = cfg.model.feature_projection_output_size
     feature_projection_hidden_size = cfg.model.feature_projection_hidden_size
     
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+    
     trainer_params = {
         'max_epochs': max_epochs,
         'accelerator': cfg.accelerator,
+        'callbacks': [lr_monitor],
     }
 
     pipeline = Pipeline(
@@ -139,16 +146,20 @@ def run_pipeline(cfg):
             }
     
         ),
-        transforms=[],
+        transforms=[
+            TimeFlagsTransform(minute_in_hour_number=True, hour_number=True, out_column="time"),
+            DateFlagsTransform(day_number_in_week=True, day_number_in_month=True, is_weekend=False, out_column="date"),
+            StandardScalerTransform(in_column=["time_minute_in_hour_number", "time_hour_number", "date_day_number_in_week", "date_day_number_in_month"])
+        ],
         horizon=horizon,
     )
     
     pipeline.transforms
-    metrics_df, _, _ = pipeline.backtest(
+    metrics_df, forecast, _ = pipeline.backtest(
         tsdataset, metrics=[MSE(), MAE(), SMAPE()],
         n_folds=1
     )
-    
+        
     print(metrics_df.head())
     print(metrics_df.mean())
     
