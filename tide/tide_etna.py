@@ -16,7 +16,7 @@ class TiDeNet(DeepBaseNet):
         self,
         lr: float = 1e-2,
         loss: nn.Module = nn.MSELoss(),
-        optimizer_params: dict | None = None,
+        optimizer_params: dict = None,
         **kwargs,
     ):
         super().__init__()
