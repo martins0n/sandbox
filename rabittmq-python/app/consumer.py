@@ -1,10 +1,11 @@
 # consumer.py
 import asyncio
 from aio_pika import connect, IncomingMessage
+import random
 
 async def on_message(message: IncomingMessage):
     async with message.process():
-        await asyncio.sleep(100)
+        await asyncio.sleep(random.randint(1, 100))
         print(f"Received task: {message.body.decode()}")
 
 async def main():
