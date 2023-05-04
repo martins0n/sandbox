@@ -1,0 +1,33 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  producer:
+    build: .
+    container_name: producer
+    command: python /app/app/producer.py
+    depends_on:
+      - rabbitmq
+    volumes:
+      - .:/app
+
+  consumer:
+    build: .
+    container_name: consumer
+    command: python /app/app/consumer.py
+    depends_on:
+      - rabbitmq
+    volumes:
+      - .:/app
