@@ -1,5 +1,5 @@
 lr: 0.001
-horizon: 96
+horizon: ${experiment.horizon}
 lookback: 720
 ne_blocks: 2
 nd_blocks: 2
@@ -9,7 +9,7 @@ covariates_size: 4
 temporal_decoder_hidden_size: 64
 decoder_output_size:  ${mul:8,${.horizon}}
 static_covariates_size: 1
-max_epochs: 1000
+max_epochs: 10
 feature_projection_output_size: 4
 feature_projection_hidden_size: 4
 train_size: 0.8
