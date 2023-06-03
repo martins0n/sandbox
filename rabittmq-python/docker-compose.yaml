@@ -31,3 +31,6 @@ services:
       - rabbitmq
     volumes:
       - .:/app
+    mem_limit: 50m
+    
+

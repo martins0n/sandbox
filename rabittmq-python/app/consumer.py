@@ -5,7 +5,12 @@ import random
 
 async def on_message(message: IncomingMessage):
     async with message.process():
-        await asyncio.sleep(random.randint(1, 100))
+        # print message metadata
+        print(message.info())
+        print(message.body)
+
+        await asyncio.sleep(random.randint(1, 10))
+        a = [f"{i}" for i in range(100_000_000)]
         print(f"Received task: {message.body.decode()}")
 
 async def main():
@@ -14,13 +19,17 @@ async def main():
     
     channel_second = await connection.channel()
     
-    await channel.set_qos(prefetch_count=10)
+    await channel.set_qos(prefetch_count=1)
     
-    await channel_second.set_qos(prefetch_count=100)
+    await channel_second.set_qos(prefetch_count=1)
 
-    queue = await channel.declare_queue("tasks", durable=True)
+    queue = await channel.declare_queue("tasks", durable=True, arguments={
+        'x-dead-letter-exchange': 'dead.letter.exchange'
+    })
     
-    queue_second = await channel_second.declare_queue("tasks", durable=True)
+    queue_second = await channel_second.declare_queue("tasks", durable=True, arguments={
+        'x-dead-letter-exchange': 'dead.letter.exchange'
+    })
     
     await queue.consume(on_message)
     await queue_second.consume(on_message)

@@ -6,10 +6,14 @@ async def main():
     connection = await connect("amqp://guest:guest@rabbitmq:5672")
     channel = await connection.channel()
 
-    queue = await channel.declare_queue("tasks", durable=True)
+    queue = await channel.declare_queue("tasks", durable=True, arguments={
+        'x-dead-letter-exchange': 'dead.letter.exchange'
+    })
 
-    for i in range(1000):
-        message = Message(f"Task {i}".encode())
+    for i in range(10):
+        message = Message(f"Task {i}".encode(), expiration=600, headers={
+            "x-dead-letter-exchange": "dead.letter.exchange",
+        })
         await channel.default_exchange.publish(message, routing_key=queue.name)
         print(f"Sent task {i}")
 
