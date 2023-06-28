@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "rpc-pattern"
+version = "0.1.0"
+description = ""
+authors = ["martins0n <33594071+martins0n@users.noreply.github.com>"]
+readme = "README.md"
+packages = [{include = "rpc_pattern"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.98.0"
+aio-pika = "^9.1.3"
+pydantic = "^1.10.9"
+uvicorn = "^0.22.0"
+locust = "^2.15.1"
+isort = "^5.12.0"
+black = "^23.3.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
