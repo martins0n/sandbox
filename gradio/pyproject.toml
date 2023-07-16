@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "gradio-ex"
+version = "0.1.0"
+description = ""
+authors = ["martins0n <33594071+martins0n@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+gradio = "^3.36.1"
+openai = "^0.27.8"
+python-dotenv = "^1.0.0"
+
+
+[tool.poetry.group.dev.dependencies]
+isort = "^5.12.0"
+black = "^23.7.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
