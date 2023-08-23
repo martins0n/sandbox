@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "pi-trans"
+version = "0.1.0"
+description = ""
+authors = ["martins0n <33594071+martins0n@users.noreply.github.com>"]
+readme = "README.md"
+packages = [{include = "pi_trans"}]
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.11.0"
+etna = {version = "<2", extras = ["torch", "wandb"]}
+fastparquet = "^2023.2.0"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^23.3.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
