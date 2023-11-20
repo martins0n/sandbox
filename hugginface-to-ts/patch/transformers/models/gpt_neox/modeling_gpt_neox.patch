@@ -1,0 +1,4 @@
+601c601
+<         batch_size, seq_length = input_shape
+---
+>         batch_size, seq_length, s = input_shape
