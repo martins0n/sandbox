@@ -8,6 +8,8 @@ from torch import nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM
+from accelerate import Accelerator, init_empty_weights, infer_auto_device_map, dispatch_model
+
 
 context_length = int(os.environ.get("CONTEXT_LENGTH", 30))
 target_length = int(os.environ.get("TARGET_LENGTH", 10))
@@ -15,20 +17,41 @@ test_size = float(os.environ.get("TEST_SIZE", 0.2))
 batch_size = int(os.environ.get("BATCH_SIZE", 32))
 lr = float(os.environ.get("LR", 5e-5))
 num_epochs = int(os.environ.get("NUM_EPOCHS", 10))
+model_name = str(os.environ.get("MODEL", "EleutherAI/pythia-70m"))
 
+with init_empty_weights():
+    model = AutoModelForCausalLM.from_pretrained(model_name)
 
-model = AutoModelForCausalLM.from_pretrained("EleutherAI/pythia-70m")
+def init():
+    global model, model_name
+    if model_name == "EleutherAI/pythia-70m":
 
+        model.gpt_neox.embed_in = nn.Linear(1, 512)
 
-model.gpt_neox.embed_in = nn.Linear(1, 512)
+        model.gpt_neox.embed_out = nn.Linear(512, 1)
 
-model.gpt_neox.embed_out = nn.Linear(512, 1)
+        model.embed_out = nn.Linear(512, 1)
 
-model.embed_out = nn.Linear(512, 1)
+    if model_name == "EleutherAI/pythia-1B":
+        model.gpt_neox.embed_in = nn.Linear(1, 2048)
+
+        model.embed_out = nn.Linear(2048, 1)
+
+# todo fix hardcoded max_memory
+device_map = infer_auto_device_map(model, max_memory={0:"1GB", 1:"14GB", "cpu": "60GiB"})
+
+print(f"device map {device_map}")
+model = AutoModelForCausalLM.from_pretrained(model_name)
+
+init()
+
+model = dispatch_model(model, device_map=device_map)
 
 df = pd.read_csv(
     "https://raw.githubusercontent.com/tinkoff-ai/etna/master/examples/data/example_dataset.csv"
 )
+
+accelerator = Accelerator()
 
 
 class Sample(TypedDict):
@@ -78,13 +101,13 @@ train_samples = [sample for sample in samples if sample["timestamp"] < test_time
 test_samples = [sample for sample in samples if sample["timestamp"] >= test_timestmap]
 
 
+
+optimizer = AdamW(model.parameters(), lr=lr)
+
 train_dataset = DataLoader(train_samples, batch_size=batch_size, shuffle=True)
 test_dataset = DataLoader(test_samples, batch_size=batch_size, shuffle=False)
 
-sample = next(iter(train_dataset))
-
-
-optimizer = AdamW(model.parameters(), lr=lr)
+optimizer, train_dataset, test_dataset = accelerator.prepare(optimizer, train_dataset, test_dataset)
 
 model.train()
 for epoch in range(num_epochs):
@@ -96,7 +119,7 @@ for epoch in range(num_epochs):
         shifted_outputs = outputs.logits[:, :-1]
         target = full_seq[:, 1:]
         loss = (shifted_outputs - target).pow(2).mean()
-        loss.backward()
+        accelerator.backward(loss)
         loss = loss.item()
         test_losses.append(loss)
         optimizer.step()
