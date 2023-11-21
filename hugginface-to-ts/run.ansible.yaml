@@ -1,0 +1,25 @@
+- hosts: 'all'
+  user: root
+  pre_tasks:
+    - name: Copy files
+      ansible.builtin.synchronize:
+        src: ./
+        dest: /work
+        recursive: yes
+    - name: Install dependencies
+      shell: export PS1="1" && source ~/.bashrc && pip install -r requirements.txt
+      args:
+        chdir: /work
+        executable: /usr/bin/bash
+      environment:
+        PATH: 
+    - name: Apply patch
+      shell: export PS1="1" && source ~/.bashrc && make apply-patch
+      args:
+        chdir: /work
+        executable: /usr/bin/bash
+    # - name: Run script
+    #   shell: export PS1="1" && source ~/.bashrc && python run.py
+    #   args:
+    #     chdir: /work
+    #     executable: /usr/bin/bash
