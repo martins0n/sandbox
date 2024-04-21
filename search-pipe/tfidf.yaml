@@ -1,0 +1,5 @@
+_target_: index.TfidfIndex
+top_k: 3
+metric: cosine
+tfidf_params:
+  analyzer: char

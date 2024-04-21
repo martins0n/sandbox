@@ -1,0 +1,8 @@
+nltk
+rapidfuzz
+typer
+scikit-learn
+pandas
+langdetect
+pymorphy3
+hydra-slayer
