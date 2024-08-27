@@ -67,11 +67,11 @@ class TfidfIndex(IIndex):
     def find_most_similar_texts(self, sample_text, top_k=None):
         if top_k is None:
             top_k = self.top_k
-        sample_vector = self.vectorizer.transform([sample_text])
+        sample_vector = self.vectorizer.transform(sample_text)
         distances, indices = self.nn.kneighbors(sample_vector)
         return [
-            (self.target_list[idx], 1 - dist)
-            for idx, dist in zip(indices[0], distances[0])
+            [(self.target_list[idx], 1 - dist) for idx, dist in zip(indices[i], distances[i])]
+            for i in range(distances.shape[0])
         ]
 
 
@@ -114,7 +114,7 @@ def create(save_path, file_path, index_config_path):
 
 
 @app.command()
-def infer(items_path: Path, index_path: Path, result_path: Path, top_k: int = 3):
+def infer(items_path: Path, index_path: Path, result_path: Path, top_k: int = 3, batch_size: int = 10):
     with open(index_path, "rb") as f:
         index = joblib.load(f)
 
@@ -124,13 +124,21 @@ def infer(items_path: Path, index_path: Path, result_path: Path, top_k: int = 3)
     items = df_items["text"].values.tolist()
 
     results = []
-    for i, item in tqdm(enumerate(items)):
-        results.append(index.find_most_similar_texts(normalize(item), top_k))
-
+    for i in tqdm(range(0, len(items), batch_size)):
+        result = index.find_most_similar_texts(items[i: batch_size + i ], top_k)
+        results.extend(result)
     df_items["result"] = results
 
     df_items.to_json(result_path, orient="records", force_ascii=False, lines=True)
 
 
 if __name__ == "__main__":
+    
     app()
+    
+    # # test index TfidfIndex
+    
+    # index = TfidfIndex()
+    # index.fit(["hello world", "world hello", "world hello world"])
+    
+    # print(index.find_most_similar_texts(["hello world", "hello world"], top_k=2))
